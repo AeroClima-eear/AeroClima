@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Estação Meteorológica - ESP32</title>
+  
+  <!-- Estilos e Fontes -->
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #f0f2f5;
+      color: #333;
+      padding: 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 25px;
+    }
+    h1 {
+      font-size: 1.8rem;
+      color: #1a202c;
+    }
+    .cards {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+    .card {
+      flex: 1;
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+      text-align: center;
+    }
+    .card h3 {
+      font-size: 0.9rem;
+      color: #718096;
+      margin-bottom: 8px;
+    }
+    .card .valor {
+      font-size: 2rem;
+      font-weight: bold;
+    }
+    .card.temp .valor { color: #e53e3e; }
+    .card.umid .valor { color: #3182ce; }
+    
+    .chart-box {
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    }
+    .atualizacao {
+      text-align: center;
+      font-size: 0.8rem;
+      color: #a0aec0;
+      margin-top: 15px;
+    }
+  </style>
+
+  <!-- Firebase SDK e Chart.js via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h1>AeroClima</h1>
+    </header>
+
+    <!-- Indicadores Instantâneos (Tempo Real) -->
+    <div class="cards">
+      <div class="card temp">
+        <h3>TEMPERATURA ATUAL</h3>
+        <div class="valor" id="temp-atual">-- °C</div>
+      </div>
+      <div class="card umid">
+        <h3>UMIDADE ATUAL</h3>
+        <div class="valor" id="umid-atual">-- %</div>
+      </div>
+    </div>
+
+    <!-- Gráfico do Histórico -->
+    <div class="chart-box">
+      <canvas id="graficoHistorico"></canvas>
+    </div>
+
+    <div class="atualizacao" id="ultima-atualizacao">
+      Aguardando dados...
+    </div>
+  </div>
+
+  <script>
+    // 1. INSIRA ABAIXO A URL DO SEU FIREBASE REALTIME DATABASE
+    const firebaseConfig = {
+      databaseURL: "https://aeroclima2-default-rtdb.firebaseio.com/"
+    };
+
+    // Inicializa o Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // Configuração do Gráfico (Chart.js)
+    const ctx = document.getElementById('graficoHistorico').getContext('2d');
+    const grafico = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: 'Temperatura (°C)',
+            borderColor: '#e53e3e',
+            backgroundColor: 'rgba(229, 62, 62, 0.1)',
+            data: [],
+            fill: true,
+            tension: 0.3
+          },
+          {
+            label: 'Umidade (%)',
+            borderColor: '#3182ce',
+            backgroundColor: 'rgba(49, 130, 206, 0.1)',
+            data: [],
+            fill: true,
+            tension: 0.3
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: 'top' }
+        },
+        scales: {
+          x: { title: { display: true, text: 'Horário' } }
+        }
+      }
+    });
+
+    // 2. ESCUTA A PASTA EM TEMPO REAL (/estacao/atual)
+    db.ref('/estacao/atual').on('value', snapshot => {
+      const data = snapshot.val();
+      if (data) {
+        document.getElementById('temp-atual').innerText = `${data.temperatura.toFixed(1)} °C`;
+        document.getElementById('umid-atual').innerText = `${data.umidade.toFixed(1)} %`;
+        document.getElementById('ultima-atualizacao').innerText = `Última atualização: ${data.ultima_atualizacao}`;
+      }
+    });
+
+    // 3. ESCUTA A PASTA DO HISTÓRICO (/estacao/historico) - Puxa os últimos 30 minutos
+    db.ref('/estacao/historico').limitToLast(30).on('value', snapshot => {
+      const rotulosHorario = [];
+      const dadosTemp = [];
+      const dadosUmid = [];
+
+      snapshot.forEach(childSnapshot => {
+        const registro = childSnapshot.val();
+        if (registro.horario) {
+          // Extrai apenas a hora e o minuto (HH:MM:SS) da string "YYYY-MM-DD HH:MM:SS"
+          const horaFormatada = registro.horario.split(' ')[1] || registro.horario;
+          rotulosHorario.push(horaFormatada);
+        } else {
+          rotulosHorario.push('');
+        }
+        dadosTemp.push(registro.temperatura);
+        dadosUmid.push(registro.umidade);
+      });
+
+      // Atualiza os dados no gráfico
+      grafico.data.labels = rotulosHorario;
+      grafico.data.datasets[0].data = dadosTemp;
+      grafico.data.datasets[1].data = dadosUmid;
+      grafico.update();
+    });
+  </script>
+</body>
+</html>
